@@ -3,9 +3,12 @@ import numpy as np
 
 from torch import nn
 import torch
+import torchvision
 import torchvision.models as models
 import torch.optim as optim
 from torchvision import transforms
+
+from ShuffleMNIST import dataset as Shuffdata
 
 batch_size_train = 64
 batch_size_test = 1000
@@ -65,7 +68,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 #para el nombre de las imágenes
 count_fig = 0
 
-n_epochs = 100
+n_epochs = 500
 print_every = 100
 valid_loss_min = np.Inf
 val_loss = []
@@ -130,7 +133,7 @@ for epoch in range(1, n_epochs+1):
 
             #print(img.shape)
             data_t = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])(img)
-            data_t = data_.to(device)
+            data_t = data_t.to(device)
 
 
             outputs_t = net(data_t)
