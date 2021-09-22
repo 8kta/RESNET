@@ -9,6 +9,7 @@ import torch.optim as optim
 from torchvision import transforms
 
 from ShuffleMNIST import dataset as Shuffdata
+from utils import timer
 
 batch_size_train = 64
 batch_size_test = 1000
@@ -23,8 +24,24 @@ dataset_test =  torchvision.datasets.MNIST('/home/alessio/alonso/datasets', trai
 train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size_train,drop_last=True, shuffle = True)
 test_loader = torch.utils.data.DataLoader(dataset_test,batch_size=batch_size_test, shuffle = True,drop_last=True)
 
-shuffled_train = Shuffdata.ShuffleMNIST(train_loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=True)
-shuffled_test = Shuffdata.ShuffleMNIST(test_loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True, is_train = False)
+
+def train_func(loader):
+    return Shuffdata.ShuffleMNIST(loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=True)
+
+def test_func(loader):
+    return Shuffdata.ShuffleMNIST(loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=False)
+    
+@timer
+def new_func(loader, sh_func):
+    shuffled_data = sh_func(loader)
+    return shuffled_data
+
+shuffled_train = new_func(train_loader, train_func)
+shuffled_test = new_func(test_loader, test_func)
+
+#shuffled_train = Shuffdata.ShuffleMNIST(train_loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=True)
+#shuffled_test = Shuffdata.ShuffleMNIST(test_loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True, is_train = False)
+
 
 print('There are {} images and {} labels in the train set.'.format(len(shuffled_train.train_img),
         len(shuffled_train.train_label)))
@@ -45,10 +62,12 @@ testshuffled_loader = torch.utils.data.DataLoader(shuffled_test, batch_size=batc
                                                   ,drop_last=False, sampler = test_sampler)
 
 
-resnet18 = models.resnet18()
+#resnet18 = models.resnet18()
+googlenet = models.googlenet()
 
 #configurando la led para las targetas gráficas
-net = models.resnet18(pretrained=True)
+#net = models.resnet18(pretrained=True)
+net = models.googlenet(pretrained=False)
 net = net.cuda()
 net
 
@@ -152,7 +171,7 @@ for epoch in range(1, n_epochs+1):
         #mientras lo graficarmeos cada 100 epocs
 
 
-        count_fig =+ 1
+        #count_fig =+ 1
         fig = plt.figure(figsize=(20,10))
         plt.title("Train-Validation Accuracy")
         plt.plot(train_acc, label='train')
@@ -160,7 +179,7 @@ for epoch in range(1, n_epochs+1):
         plt.xlabel('num_epochs', fontsize=12)
         plt.ylabel('accuracy', fontsize=12)
         plt.legend(loc='best')
-        plt.savefig(f'prueba{count_fig}.png')
+        plt.savefig('prueba3GoogleNetNotPretrained.png')
 
         
         if network_learned:
