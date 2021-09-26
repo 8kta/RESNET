@@ -67,6 +67,7 @@ googlenet = models.googlenet()
 
 #configurando la led para las targetas gráficas
 #net = models.resnet18(pretrained=True)
+
 net = models.googlenet(pretrained=False)
 net = net.cuda()
 net
@@ -80,7 +81,13 @@ def accuracy(out, labels):
 
 num_ftrs = net.fc.in_features
 net.fc = nn.Linear(num_ftrs, 37)
-net.fc = net.fc.cuda()
+net.fc = net.fc#.cuda()
+
+torch.cuda.init()
+
+print(f'La targeta está inicializada: {torch.cuda.is_initialized()}')
+
+#net = torch.nn.DataParallel(googlenet, device_ids=[0, 1, 2, 3])
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -179,7 +186,7 @@ for epoch in range(1, n_epochs+1):
         plt.xlabel('num_epochs', fontsize=12)
         plt.ylabel('accuracy', fontsize=12)
         plt.legend(loc='best')
-        plt.savefig('prueba3GoogleNetNotPretrained.png')
+        plt.savefig('prueba4GoogleNetNotPretrained.png')
 
         
         if network_learned:
