@@ -21,13 +21,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger('RESNet')
 
+logger.info('='*70)
+logger.info('Experiment: GoogLeNet (from scratch) on ShuffleMNIST')
+logger.info('Task: predict the SUM of 4 MNIST digits pasted on a 112x112 canvas, '
+            'i.e. a 37-class classification problem (sums range from 0 to 36)')
+logger.info('='*70)
+
 batch_size_train = 64
 batch_size_test = 1000
 
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'datasets')
 
-logger.info('Loading MNIST datasets from %s (downloading if missing)', DATA_DIR)
+logger.info('Step 1 - Base data: loading MNIST from %s (auto-download if missing). '
+            'MNIST provides the individual digits used to compose the ShuffleMNIST samples', DATA_DIR)
 dataset_train =  torchvision.datasets.MNIST(DATA_DIR, train=True, download=True,
                              transform=torchvision.transforms.ToTensor())
 
@@ -37,7 +44,8 @@ logger.info('MNIST loaded: %d train samples, %d test samples', len(dataset_train
 
 train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size_train,drop_last=True, shuffle = True)
 test_loader = torch.utils.data.DataLoader(dataset_test,batch_size=batch_size_test, shuffle = True,drop_last=True)
-logger.info('MNIST DataLoaders created (batch_size_train=%d, batch_size_test=%d)', batch_size_train, batch_size_test)
+logger.info('MNIST DataLoaders created (batch_size_train=%d, batch_size_test=%d, shuffle=True, '
+            'drop_last=True to keep batch shapes constant during composition)', batch_size_train, batch_size_test)
 
 
 def train_func(loader):
@@ -51,9 +59,12 @@ def new_func(loader, sh_func):
     shuffled_data = sh_func(loader)
     return shuffled_data
 
-logger.info('Building ShuffleMNIST train set (num=4, radius=42, wall_shape=112, sum=True)')
+logger.info('Step 2 - Dataset synthesis: building ShuffleMNIST. Each sample pastes num=4 random digits '
+            'at random non-overlapping anchors (min separation radius=42 px) on a wall_shape=112x112 canvas; '
+            'sum=True makes the target the sum of the 4 digits')
 shuffled_train = new_func(train_loader, train_func)
-logger.info('Building ShuffleMNIST test set')
+logger.info('Building ShuffleMNIST test set with identical parameters, from the held-out MNIST test split '
+            'so no digit seen in training appears in validation')
 shuffled_test = new_func(test_loader, test_func)
 
 #shuffled_train = Shuffledata.ShuffleMNIST(train_loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=True)
@@ -77,7 +88,9 @@ trainshuffled_loader = torch.utils.data.DataLoader(shuffled_train, batch_size=ba
 
 testshuffled_loader = torch.utils.data.DataLoader(shuffled_test, batch_size=batch_size_train
                                                   ,drop_last=False, sampler = test_sampler)
-logger.info('Shuffled DataLoaders created (train num_samples=51200, test num_samples=5760)')
+logger.info('Step 3 - Sampling: RandomSampler with replacement fixes the epoch size '
+            '(51200 train / 5760 val samples per epoch) independently of the synthesized dataset size, '
+            'giving uniform epochs and additional stochasticity')
 
 
 #resnet18 = models.resnet18()
@@ -93,9 +106,11 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device('cpu')
 
-logger.info('Using device: %s', device)
+logger.info('Step 4 - Hardware: using device %s (priority: CUDA > Apple MPS > CPU)', device)
 
-logger.info('Creating GoogLeNet (weights=None, aux_logits=False)')
+logger.info('Step 5 - Model: GoogLeNet trained FROM SCRATCH (weights=None) to measure pure learning '
+            'capacity on the synthetic task without ImageNet transfer; aux_logits=False since the '
+            'auxiliary classifiers are an ImageNet-era training aid and are unsupported on MPS')
 net = models.googlenet(weights=None, aux_logits=False, init_weights=True)
 net = net.to(device)
 net
@@ -109,10 +124,12 @@ def accuracy(out, labels):
 num_ftrs = net.fc.in_features
 net.fc = nn.Linear(num_ftrs, 37)
 net.fc = net.fc.to(device)
-logger.info('Replaced classifier head: %d -> 37 classes', num_ftrs)
+logger.info('Step 6 - Head replacement: final FC layer resized %d -> 37 outputs, one per possible '
+            'digit sum (0..36 = 4 digits x max 9)', num_ftrs)
 
 optimizer = optim.SGD(net.parameters(), lr=0.0001, momentum=0.9)
-logger.info('Optimizer: SGD(lr=0.0001, momentum=0.9), Loss: CrossEntropyLoss')
+logger.info('Step 7 - Optimization: SGD(lr=0.0001, momentum=0.9) chosen for stable convergence when '
+            'training from scratch; CrossEntropyLoss as the standard multi-class classification objective')
 
 #net = torch.nn.DataParallel(googlenet, device_ids=[0, 1, 2, 3])
 
@@ -130,7 +147,11 @@ val_acc = []
 train_loss = []
 train_acc = []
 total_step = len(trainshuffled_loader)
-logger.info('Starting training: %d epochs, %d steps per epoch', n_epochs, total_step)
+logger.info('Step 8 - Training loop: up to %d epochs, %d steps/epoch. Inputs are replicated from 1 to 3 '
+            'channels (GoogLeNet expects RGB) and normalized with ImageNet statistics '
+            '(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225]). Early stopping with patience=%d epochs '
+            'on validation loss prevents overfitting and wasted compute',
+            n_epochs, total_step, patience)
 for epoch in range(1, n_epochs+1):
     running_loss = 0.0
     correct = 0
@@ -167,11 +188,13 @@ for epoch in range(1, n_epochs+1):
                    epoch, n_epochs, batch_idx, total_step, loss.item())
     train_acc.append(100 * correct / total)
     train_loss.append(running_loss/total_step)
-    logger.info('train-loss: %.4f, train-acc: %.4f', np.mean(train_loss), 100 * correct/total)
+    logger.info('Epoch %d training done - mean train-loss: %.4f, train-acc: %.4f%% (%d/%d correct)',
+                epoch, np.mean(train_loss), 100 * correct/total, correct, total)
     batch_loss = 0
     total_t=0
     correct_t=0
-    logger.info('Epoch %d validation started', epoch)
+    logger.info('Epoch %d validation started (net.eval + torch.no_grad: batchnorm frozen, no gradients, '
+                'so the metric reflects pure generalization on unseen digit compositions)', epoch)
     with torch.no_grad():
         net.eval()
         for data_t, target_t in (testshuffled_loader):
@@ -201,7 +224,8 @@ for epoch in range(1, n_epochs+1):
         val_acc.append(100 * correct_t/total_t)
         val_loss.append(batch_loss/len(testshuffled_loader))
         network_learned = batch_loss < valid_loss_min
-        logger.info('validation loss: %.4f, validation acc: %.4f', np.mean(val_loss), 100 * correct_t/total_t)
+        logger.info('Epoch %d validation done - mean val-loss: %.4f, val-acc: %.4f%% (%d/%d correct)',
+                    epoch, np.mean(val_loss), 100 * correct_t/total_t, correct_t, total_t)
 
         #Queremos graficar el entrenamiento
         #Puede esto verse a 'tiempo real'??
@@ -217,19 +241,26 @@ for epoch in range(1, n_epochs+1):
         plt.ylabel('accuracy', fontsize=12)
         plt.legend(loc='best')
         plt.savefig(plot_filename)
-        logger.info('Accuracy plot saved to %s', plot_filename)
+        logger.info('Train/validation accuracy curves updated in %s for visual inspection of '
+                    'convergence and overfitting gap', plot_filename)
 
         
         if network_learned:
             epochs_no_improve = 0
             valid_loss_min = batch_loss
             torch.save(net.state_dict(), 'resnet.pt')
-            logger.info('Improvement detected (val loss %.4f), model saved to resnet.pt', batch_loss)
+            logger.info('Improvement detected (val loss %.4f < previous best): checkpoint saved to resnet.pt. '
+                        'Only the best-generalizing weights are persisted (model selection criterion)', batch_loss)
         else:
             epochs_no_improve += 1
             logger.info('No improvement for %d epoch(s), best val loss: %.4f', epochs_no_improve, valid_loss_min)
     net.train()
 
     if epochs_no_improve >= patience:
-        logger.info('Early stopping at epoch %d: validation loss did not improve for %d consecutive epochs', epoch, patience)
+        logger.info('Early stopping triggered at epoch %d: validation loss did not improve for %d consecutive '
+                    'epochs, indicating the network has stopped learning; best val loss achieved: %.4f',
+                    epoch, patience, valid_loss_min)
         break
+
+logger.info('Training finished after %d epoch(s). Best validation loss: %.4f. '
+            'Best model stored in resnet.pt, accuracy curves in %s', epoch, valid_loss_min, plot_filename)
