@@ -1,3 +1,4 @@
+import logging
 import os
 
 import matplotlib.pyplot as plt
@@ -10,8 +11,15 @@ import torchvision.models as models
 import torch.optim as optim
 from torchvision import transforms
 
-from ShuffleMNIST import dataset as Shuffdata
+from ShuffleMNIST import dataset as Shuffledata
 from utils import timer
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[logging.StreamHandler(), logging.FileHandler('resnet.log')],
+)
+logger = logging.getLogger('RESNet')
 
 batch_size_train = 64
 batch_size_test = 1000
@@ -19,38 +27,43 @@ batch_size_test = 1000
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'datasets')
 
+logger.info('Loading MNIST datasets from %s (downloading if missing)', DATA_DIR)
 dataset_train =  torchvision.datasets.MNIST(DATA_DIR, train=True, download=True,
                              transform=torchvision.transforms.ToTensor())
 
 dataset_test =  torchvision.datasets.MNIST(DATA_DIR, train=False, 
                                            download=True,transform=torchvision.transforms.ToTensor())
+logger.info('MNIST loaded: %d train samples, %d test samples', len(dataset_train), len(dataset_test))
 
 train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size_train,drop_last=True, shuffle = True)
 test_loader = torch.utils.data.DataLoader(dataset_test,batch_size=batch_size_test, shuffle = True,drop_last=True)
+logger.info('MNIST DataLoaders created (batch_size_train=%d, batch_size_test=%d)', batch_size_train, batch_size_test)
 
 
 def train_func(loader):
-    return Shuffdata.ShuffleMNIST(loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=True)
+    return Shuffledata.ShuffleMNIST(loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=True)
 
 def test_func(loader):
-    return Shuffdata.ShuffleMNIST(loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=False)
+    return Shuffledata.ShuffleMNIST(loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=False)
     
 @timer
 def new_func(loader, sh_func):
     shuffled_data = sh_func(loader)
     return shuffled_data
 
+logger.info('Building ShuffleMNIST train set (num=4, radius=42, wall_shape=112, sum=True)')
 shuffled_train = new_func(train_loader, train_func)
+logger.info('Building ShuffleMNIST test set')
 shuffled_test = new_func(test_loader, test_func)
 
-#shuffled_train = Shuffdata.ShuffleMNIST(train_loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=True)
-#shuffled_test = Shuffdata.ShuffleMNIST(test_loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True, is_train = False)
+#shuffled_train = Shuffledata.ShuffleMNIST(train_loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True,is_train=True)
+#shuffled_test = Shuffledata.ShuffleMNIST(test_loader, anchors = [], num=4, radius = 42, wall_shape = 112, sum = True, is_train = False)
 
 
-print('There are {} images and {} labels in the train set.'.format(len(shuffled_train.train_img),
-        len(shuffled_train.train_label)))
-print('There are {} images and {} labels in the test set.'.format(len(shuffled_test.test_img),
-        len(shuffled_test.test_label)))
+logger.info('There are %d images and %d labels in the train set.', len(shuffled_train.train_img),
+        len(shuffled_train.train_label))
+logger.info('There are %d images and %d labels in the test set.', len(shuffled_test.test_img),
+        len(shuffled_test.test_label))
 
 #Configuring shuffled DataLoader
 from torch.utils.data.sampler import RandomSampler
@@ -64,6 +77,7 @@ trainshuffled_loader = torch.utils.data.DataLoader(shuffled_train, batch_size=ba
 
 testshuffled_loader = torch.utils.data.DataLoader(shuffled_test, batch_size=batch_size_train
                                                   ,drop_last=False, sampler = test_sampler)
+logger.info('Shuffled DataLoaders created (train num_samples=51200, test num_samples=5760)')
 
 
 #resnet18 = models.resnet18()
@@ -79,9 +93,10 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device('cpu')
 
-print(f'Using device: {device}')
+logger.info('Using device: %s', device)
 
-net = models.googlenet(pretrained=False)
+logger.info('Creating GoogLeNet (weights=None, aux_logits=False)')
+net = models.googlenet(weights=None, aux_logits=False, init_weights=True)
 net = net.to(device)
 net
 
@@ -94,15 +109,18 @@ def accuracy(out, labels):
 num_ftrs = net.fc.in_features
 net.fc = nn.Linear(num_ftrs, 37)
 net.fc = net.fc.to(device)
+logger.info('Replaced classifier head: %d -> 37 classes', num_ftrs)
 
 optimizer = optim.SGD(net.parameters(), lr=0.0001, momentum=0.9)
+logger.info('Optimizer: SGD(lr=0.0001, momentum=0.9), Loss: CrossEntropyLoss')
 
 #net = torch.nn.DataParallel(googlenet, device_ids=[0, 1, 2, 3])
 
 #para el nombre de las imágenes
 count_fig = 0
+plot_filename = 'prueba5GoogleNetNotPretrained.png'
 
-n_epochs = 2
+n_epochs = 500
 print_every = 100
 valid_loss_min = np.inf
 val_loss = []
@@ -110,11 +128,12 @@ val_acc = []
 train_loss = []
 train_acc = []
 total_step = len(trainshuffled_loader)
+logger.info('Starting training: %d epochs, %d steps per epoch', n_epochs, total_step)
 for epoch in range(1, n_epochs+1):
     running_loss = 0.0
     correct = 0
     total=0
-    print(f'Epoch {epoch}\n')
+    logger.info('Epoch %d started', epoch)
     for batch_idx, (data_, target_) in enumerate(trainshuffled_loader):
         data_, target_ = data_, target_.to(device)
         optimizer.zero_grad()
@@ -142,14 +161,15 @@ for epoch in range(1, n_epochs+1):
         correct += torch.sum(pred==target_).item()
         total += target_.size(0)
         if (batch_idx) % 20 == 0:
-            print ('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}' 
-                   .format(epoch, n_epochs, batch_idx, total_step, loss.item()))
+            logger.info('Epoch [%d/%d], Step [%d/%d], Loss: %.4f',
+                   epoch, n_epochs, batch_idx, total_step, loss.item())
     train_acc.append(100 * correct / total)
     train_loss.append(running_loss/total_step)
-    print(f'\ntrain-loss: {np.mean(train_loss):.4f}, train-acc: {(100 * correct/total):.4f}')
+    logger.info('train-loss: %.4f, train-acc: %.4f', np.mean(train_loss), 100 * correct/total)
     batch_loss = 0
     total_t=0
     correct_t=0
+    logger.info('Epoch %d validation started', epoch)
     with torch.no_grad():
         net.eval()
         for data_t, target_t in (testshuffled_loader):
@@ -179,7 +199,7 @@ for epoch in range(1, n_epochs+1):
         val_acc.append(100 * correct_t/total_t)
         val_loss.append(batch_loss/len(testshuffled_loader))
         network_learned = batch_loss < valid_loss_min
-        print(f'validation loss: {np.mean(val_loss):.4f}, validation acc: {(100 * correct_t/total_t):.4f}\n')
+        logger.info('validation loss: %.4f, validation acc: %.4f', np.mean(val_loss), 100 * correct_t/total_t)
 
         #Queremos graficar el entrenamiento
         #Puede esto verse a 'tiempo real'??
@@ -194,11 +214,12 @@ for epoch in range(1, n_epochs+1):
         plt.xlabel('num_epochs', fontsize=12)
         plt.ylabel('accuracy', fontsize=12)
         plt.legend(loc='best')
-        plt.savefig('prueba5GoogleNetNotPretrained.png')
+        plt.savefig(plot_filename)
+        logger.info('Accuracy plot saved to %s', plot_filename)
 
         
         if network_learned:
             valid_loss_min = batch_loss
             torch.save(net.state_dict(), 'resnet.pt')
-            print('Improvement-Detected, save-model')
+            logger.info('Improvement detected (val loss %.4f), model saved to resnet.pt', batch_loss)
     net.train()
