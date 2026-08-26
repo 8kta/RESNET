@@ -18,7 +18,13 @@ from ShuffleMNIST import dataset as Shuffdata
 from PIL import Image
 
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
+if torch.cuda.is_available():
+    device = torch.device('cuda:0')
+elif torch.backends.mps.is_available():
+    device = torch.device('mps')
+else:
+    device = torch.device('cpu')
+
 start_epoch = 1
 save_dir = os.path.join(save_dir, datetime.now().strftime('%Y%m%d_%H%M%S'))
 if os.path.exists(save_dir):
@@ -94,9 +100,8 @@ schedulers = [MultiStepLR(raw_optimizer, milestones=[60, 100], gamma=0.1),
               MultiStepLR(concat_optimizer, milestones=[60, 100], gamma=0.1),
               MultiStepLR(part_optimizer, milestones=[60, 100], gamma=0.1),
               MultiStepLR(partcls_optimizer, milestones=[60, 100], gamma=0.1)]
-net = net.cuda()
+net = net.to(device)
 net = DataParallel(net)
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # Eevitar warning y que si se concidere el primer valor de la taza de aprendizaje
 # lr_scheduler.MultiStepLR()
@@ -228,7 +233,7 @@ def entrenamiento(start_epoch, _print, trainloader, testloader, net, creterion, 
             total = 0
             for i, data in enumerate(testloader):
                 with torch.no_grad():
-                    img, label = data[0].cuda(), data[1].cuda()
+                    img, label = data[0].to(device), data[1].to(device)
                     batch_size = img.size(0)
                     _, concat_logits, _, _, _ = net(img)
                 # calculate loss

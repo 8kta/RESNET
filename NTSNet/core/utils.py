@@ -1,5 +1,6 @@
 from __future__ import print_function
 import os
+import shutil
 import sys
 import time
 import logging
@@ -16,9 +17,7 @@ def timer(func):
     return wrapper
 
 
-_, term_width = os.popen('stty size', 'r').read().split()
-#term_width = 80
-term_width = int(term_width)
+term_width = shutil.get_terminal_size(fallback=(80, 24)).columns
 
 TOTAL_BAR_LENGTH = 40.
 last_time = time.time()
