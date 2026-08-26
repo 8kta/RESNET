@@ -11,11 +11,6 @@ import certifi
 ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
 
 import numpy as np
-if not hasattr(np, 'int'):
-    # NTSNet/core/anchors.py and NTSNet/core/model.py use the pre-NumPy-1.24 np.int
-    # alias (removed in numpy>=1.24, installed here is 2.4.6). Restore it process-wide
-    # so the vendored files run unmodified, instead of editing them.
-    np.int = int
 
 import matplotlib.pyplot as plt
 
@@ -155,13 +150,24 @@ save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 os.makedirs(save_dir, exist_ok=True)
 logger.info('Checkpoints will be saved to %s every %d epoch(s)', save_dir, SAVE_FREQ)
 
-plot_filename = os.path.join(save_dir, 'ntsnet_accuracy.png')
+
+def next_plot_filename(directory, base_name, ext='.png'):
+    n = 1
+    while os.path.exists(os.path.join(directory, f'{base_name}_{n}{ext}')):
+        n += 1
+    return os.path.join(directory, f'{base_name}_{n}{ext}')
+
+
+plot_filename = next_plot_filename(os.path.dirname(os.path.abspath(__file__)), 'ntsnet_accuracy')
 logger.info('Train/validation accuracy curve for this run will be saved to %s', plot_filename)
 
 
 @timer
 def entrenamiento(start_epoch, trainloader, testloader, net, creterion, optimizers, schedulers, device):
     n_epochs = 500
+    patience = 10
+    epochs_no_improve = 0
+    test_loss_min = float('inf')
     eval_epochs = []
     train_acc_history = []
     test_acc_history = []
@@ -245,6 +251,15 @@ def entrenamiento(start_epoch, trainloader, testloader, net, creterion, optimize
             logger.info('epoch:%d - test loss: %.3f and test acc: %.3f total sample: %d',
                         epoch, test_loss, test_acc, total)
 
+            # early stopping: stop once test loss hasn't improved for `patience` evaluations
+            if test_loss < test_loss_min:
+                test_loss_min = test_loss
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+                logger.info('No improvement for %d evaluation(s), best test loss: %.4f',
+                            epochs_no_improve, test_loss_min)
+
             # plot accuracy curve
             eval_epochs.append(epoch)
             train_acc_history.append(train_acc)
@@ -270,6 +285,11 @@ def entrenamiento(start_epoch, trainloader, testloader, net, creterion, optimize
                 'test_acc': test_acc,
                 'net_state_dict': net_state_dict},
                 os.path.join(save_dir, '%03d.ckpt' % epoch))
+
+            if epochs_no_improve >= patience:
+                logger.info('Early stopping triggered at epoch %d: test loss did not improve for %d '
+                            'consecutive evaluation(s); best test loss: %.4f', epoch, patience, test_loss_min)
+                break
 
 
 entrenamiento(start_epoch, trainloader, testloader, net, creterion, optimizers, schedulers, device)
