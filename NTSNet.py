@@ -1,11 +1,27 @@
 import logging
 import os
+import ssl
 from datetime import datetime
 
+import certifi
+# NTSNet/core/resnet.py downloads pretrained ResNet-50 weights via torch.hub, which
+# uses the stdlib ssl module's default CA bundle. On some systems (e.g. python.org
+# installs on macOS) that bundle is empty/stale and the download fails with
+# CERTIFICATE_VERIFY_FAILED. Point it at certifi's bundle instead, process-wide.
+ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
+
 import numpy as np
+if not hasattr(np, 'int'):
+    # NTSNet/core/anchors.py and NTSNet/core/model.py use the pre-NumPy-1.24 np.int
+    # alias (removed in numpy>=1.24, installed here is 2.4.6). Restore it process-wide
+    # so the vendored files run unmodified, instead of editing them.
+    np.int = int
+
+import matplotlib.pyplot as plt
 
 import torch
 import torchvision
+from torch import nn
 from torch.nn import DataParallel
 from torch.optim.lr_scheduler import MultiStepLR
 from torchvision import transforms
@@ -38,6 +54,8 @@ logger.info('Hardware: using device %s (priority: CUDA > Apple MPS > CPU)', devi
 
 batch_size_train = 64
 batch_size_test = 1000
+
+NUM_CLASSES = 37  # sum of 4 MNIST digits (0-9 each) ranges 0..36
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'datasets')
 
@@ -102,6 +120,13 @@ def prepare_batch(data_):
 # define model
 start_epoch = 1
 net = model.attention_net(topN=PROPOSAL_NUM)
+
+# NTSNet/core/model.py hardcodes all three heads to CUB-200's 200 classes; resize them
+# here for the 37-class ShuffleMNIST digit-sum task without touching the vendored file.
+net.pretrained_model.fc = nn.Linear(net.pretrained_model.fc.in_features, NUM_CLASSES)
+net.concat_net = nn.Linear(net.concat_net.in_features, NUM_CLASSES)
+net.partcls_net = nn.Linear(net.partcls_net.in_features, NUM_CLASSES)
+
 if resume:
     ckpt = torch.load(resume, map_location=device)
     net.load_state_dict(ckpt['net_state_dict'])
@@ -130,10 +155,16 @@ save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 os.makedirs(save_dir, exist_ok=True)
 logger.info('Checkpoints will be saved to %s every %d epoch(s)', save_dir, SAVE_FREQ)
 
+plot_filename = os.path.join(save_dir, 'ntsnet_accuracy.png')
+logger.info('Train/validation accuracy curve for this run will be saved to %s', plot_filename)
+
 
 @timer
 def entrenamiento(start_epoch, trainloader, testloader, net, creterion, optimizers, schedulers, device):
     n_epochs = 500
+    eval_epochs = []
+    train_acc_history = []
+    test_acc_history = []
     for epoch in range(start_epoch, n_epochs):
         # begin training
         logger.info('Epoch %d started', epoch)
@@ -213,6 +244,21 @@ def entrenamiento(start_epoch, trainloader, testloader, net, creterion, optimize
             test_loss = test_loss / total
             logger.info('epoch:%d - test loss: %.3f and test acc: %.3f total sample: %d',
                         epoch, test_loss, test_acc, total)
+
+            # plot accuracy curve
+            eval_epochs.append(epoch)
+            train_acc_history.append(train_acc)
+            test_acc_history.append(test_acc)
+            fig = plt.figure(figsize=(20, 10))
+            plt.title('NTS-Net Train-Validation Accuracy')
+            plt.plot(eval_epochs, train_acc_history, label='train')
+            plt.plot(eval_epochs, test_acc_history, label='validation')
+            plt.xlabel('num_epochs', fontsize=12)
+            plt.ylabel('accuracy', fontsize=12)
+            plt.legend(loc='best')
+            plt.savefig(plot_filename)
+            plt.close(fig)
+            logger.info('Accuracy curve updated in %s', plot_filename)
 
             # save model
             net_state_dict = net.module.state_dict()
