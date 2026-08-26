@@ -1,3 +1,5 @@
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -15,10 +17,12 @@ batch_size_train = 64
 batch_size_test = 1000
 
 
-dataset_train =  torchvision.datasets.MNIST('/home/alessio/alonso/datasets', train=True, download=True,
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'datasets')
+
+dataset_train =  torchvision.datasets.MNIST(DATA_DIR, train=True, download=True,
                              transform=torchvision.transforms.ToTensor())
 
-dataset_test =  torchvision.datasets.MNIST('/home/alessio/alonso/datasets', train=False, 
+dataset_test =  torchvision.datasets.MNIST(DATA_DIR, train=False, 
                                            download=True,transform=torchvision.transforms.ToTensor())
 
 train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size_train,drop_last=True, shuffle = True)
@@ -68,12 +72,20 @@ googlenet = models.googlenet()
 #configurando la led para las targetas gráficas
 #net = models.resnet18(pretrained=True)
 
+if torch.cuda.is_available():
+    device = torch.device('cuda:0')
+elif torch.backends.mps.is_available():
+    device = torch.device('mps')
+else:
+    device = torch.device('cpu')
+
+print(f'Using device: {device}')
+
 net = models.googlenet(pretrained=False)
-net = net.cuda()
+net = net.to(device)
 net
 
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(net.parameters(), lr=0.0001, momentum=0.9)
 
 def accuracy(out, labels):
     _,pred = torch.max(out, dim=1)
@@ -81,22 +93,18 @@ def accuracy(out, labels):
 
 num_ftrs = net.fc.in_features
 net.fc = nn.Linear(num_ftrs, 37)
-net.fc = net.fc#.cuda()
+net.fc = net.fc.to(device)
 
-torch.cuda.init()
-
-print(f'La targeta está inicializada: {torch.cuda.is_initialized()}')
+optimizer = optim.SGD(net.parameters(), lr=0.0001, momentum=0.9)
 
 #net = torch.nn.DataParallel(googlenet, device_ids=[0, 1, 2, 3])
-
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 #para el nombre de las imágenes
 count_fig = 0
 
-n_epochs = 500
+n_epochs = 2
 print_every = 100
-valid_loss_min = np.Inf
+valid_loss_min = np.inf
 val_loss = []
 val_acc = []
 train_loss = []
@@ -186,7 +194,7 @@ for epoch in range(1, n_epochs+1):
         plt.xlabel('num_epochs', fontsize=12)
         plt.ylabel('accuracy', fontsize=12)
         plt.legend(loc='best')
-        plt.savefig('prueba4GoogleNetNotPretrained.png')
+        plt.savefig('prueba5GoogleNetNotPretrained.png')
 
         
         if network_learned:
