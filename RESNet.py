@@ -118,11 +118,13 @@ logger.info('Optimizer: SGD(lr=0.0001, momentum=0.9), Loss: CrossEntropyLoss')
 
 #para el nombre de las imágenes
 count_fig = 0
-plot_filename = 'prueba5GoogleNetNotPretrained.png'
+plot_filename = 'prueba6GoogleNetNotPretrained.png'
 
 n_epochs = 500
 print_every = 100
 valid_loss_min = np.inf
+patience = 10
+epochs_no_improve = 0
 val_loss = []
 val_acc = []
 train_loss = []
@@ -219,7 +221,15 @@ for epoch in range(1, n_epochs+1):
 
         
         if network_learned:
+            epochs_no_improve = 0
             valid_loss_min = batch_loss
             torch.save(net.state_dict(), 'resnet.pt')
             logger.info('Improvement detected (val loss %.4f), model saved to resnet.pt', batch_loss)
+        else:
+            epochs_no_improve += 1
+            logger.info('No improvement for %d epoch(s), best val loss: %.4f', epochs_no_improve, valid_loss_min)
     net.train()
+
+    if epochs_no_improve >= patience:
+        logger.info('Early stopping at epoch %d: validation loss did not improve for %d consecutive epochs', epoch, patience)
+        break
