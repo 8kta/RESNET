@@ -1,5 +1,5 @@
 import numpy as np
-from config import INPUT_SIZE
+from NTSNet.config import INPUT_SIZE
 
 _default_anchors_setting = (
     dict(layer='p3', stride=32, size=48, scale=[2 ** (1. / 3.), 2 ** (2. / 3.)], aspect_ratio=[0.667, 1, 1.5]),
@@ -34,7 +34,7 @@ def generate_default_anchor_maps(anchors_setting=None, input_shape=INPUT_SIZE):
         aspect_ratios = anchor_info['aspect_ratio']
 
         output_map_shape = np.ceil(input_shape.astype(np.float32) / stride)
-        output_map_shape = output_map_shape.astype(np.int)
+        output_map_shape = output_map_shape.astype(np.int64)
         output_shape = tuple(output_map_shape) + (4,)
         ostart = stride / 2.
         oy = np.arange(ostart, ostart + stride * output_shape[0], stride)

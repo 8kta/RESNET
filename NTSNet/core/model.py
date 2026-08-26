@@ -2,10 +2,10 @@ from torch import nn
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
-from core import resnet
+from NTSNet.core import resnet
 import numpy as np
-from core.anchors import generate_default_anchor_maps, hard_nms
-from config import CAT_NUM, PROPOSAL_NUM
+from NTSNet.core.anchors import generate_default_anchor_maps, hard_nms
+from NTSNet.config import CAT_NUM, PROPOSAL_NUM
 
 
 class ProposalNet(nn.Module):
@@ -42,7 +42,7 @@ class attention_net(nn.Module):
         self.partcls_net = nn.Linear(512 * 4, 200)
         _, edge_anchors, _ = generate_default_anchor_maps()
         self.pad_side = 224
-        self.edge_anchors = (edge_anchors + 224).astype(np.int)
+        self.edge_anchors = (edge_anchors + 224).astype(np.int64)
 
     def forward(self, x):
         resnet_out, rpn_feature, feature = self.pretrained_model(x)
@@ -55,13 +55,13 @@ class attention_net(nn.Module):
             for x in rpn_score.data.cpu().numpy()]
         top_n_cdds = [hard_nms(x, topn=self.topN, iou_thresh=0.25) for x in all_cdds]
         top_n_cdds = np.array(top_n_cdds)
-        top_n_index = top_n_cdds[:, :, -1].astype(np.int)
+        top_n_index = top_n_cdds[:, :, -1].astype(np.int64)
         top_n_index = torch.from_numpy(top_n_index).to(x.device)
         top_n_prob = torch.gather(rpn_score, dim=1, index=top_n_index)
         part_imgs = torch.zeros([batch, self.topN, 3, 224, 224], device=x.device)
         for i in range(batch):
             for j in range(self.topN):
-                [y0, x0, y1, x1] = top_n_cdds[i][j, 1:5].astype(np.int)
+                [y0, x0, y1, x1] = top_n_cdds[i][j, 1:5].astype(np.int64)
                 part_imgs[i:i + 1, j] = F.interpolate(x_pad[i:i + 1, :, y0:y1, x0:x1], size=(224, 224), mode='bilinear',
                                                       align_corners=True)
         part_imgs = part_imgs.view(batch * self.topN, 3, 224, 224)
